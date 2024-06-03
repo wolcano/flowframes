@@ -1,0 +1,93 @@
+name: Build Flowframes
+
+on: [push]
+
+jobs:
+  release:
+    env:
+      GH_TOKEN: ${{ github.token }}
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions: write-all
+    outputs:
+      timestamp: ${{ steps.get-timestamp.outputs.time }}
+    steps:
+      - name: Get build timestamp
+        id: get-timestamp
+        run: |
+          echo "time=$(/bin/date -u "+%Y-%m-%d-%H%M")" >> $GITHUB_OUTPUT
+      - name: Generate environmental variables
+        id: generate_env_vars
+        run: |
+          echo "tag_name=flowframes-${{ steps.get-timestamp.outputs.time }}" >> $GITHUB_OUTPUT
+      - uses: actions/checkout@v4
+      - run: |
+          gh release create ${{ steps.generate_env_vars.outputs.tag_name }} --generate-notes --prerelease --title "release"
+  build:
+    needs: release
+    strategy:
+      matrix:
+        configuration: [Release]
+    permissions: write-all
+    runs-on: windows-latest
+    env:
+      Solution_Name: Flowframes.sln
+      Target: Flowframes
+      Platform: x64
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    # Install the .NET Core workload
+    - name: Install .NET Core
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: 6.0.x
+
+    # Add  MSBuild to the PATH: https://github.com/microsoft/setup-msbuild
+    - name: Setup MSBuild.exe
+      uses: microsoft/setup-msbuild@v1.0.2
+
+    # Restore the application to populate the obj folder with RuntimeIdentifiers
+    - name: Build Flowframes
+      run: |
+        cd Code/
+        nuget restore $env:Solution_name
+        msbuild $env:Solution_Name /p:Configuration=$env:Configuration /p:Platform=$env:Platform -target:$env:Target
+        cd ..
+      env:
+        Configuration: ${{ matrix.configuration }}
+
+    - name: Packaging Flowframes
+      run: |
+        cd Code\bin\x64\Release
+        mkdir "FlowframesApp9999"
+        mkdir "FlowframesApp9999/FlowframesData"
+        mkdir "FlowframesApp9999/FlowframesData/pkgs"
+        cp -r "../../../../pkgs/av" "FlowframesApp9999/FlowframesData\pkgs\av"
+        cp -r ../../../../pkgs/dain-ncnn FlowframesApp9999/FlowframesData\pkgs\dain-ncnn
+        cp -r "../../../../pkgs/licenses" "FlowframesApp9999/FlowframesData\pkgs\licenses"
+        cp -r "../../../../pkgs/rife-cuda" "FlowframesApp9999/FlowframesData\pkgs\rife-cuda"
+        cp -r "../../../../pkgs/rife-ncnn" "FlowframesApp9999/FlowframesData\pkgs\rife-ncnn"
+        cp -r "../../../../pkgs/flavr-cuda" "FlowframesApp9999/FlowframesData\pkgs\flavr-cuda"
+        cp -r "../../../../pkgs/xvfi-cuda" "FlowframesApp9999/FlowframesData\pkgs\xvfi-cuda"
+        cp -r "../../../../pkgs/rife-ncnn-vs" "FlowframesApp9999/FlowframesData\pkgs\rife-ncnn-vs"
+        echo "9999" >> "FlowframesApp9999/FlowframesData/ver.ini"
+        cp -r Flowframes.exe "FlowframesApp9999"
+        cd ../../../../Build
+        ./7za.exe a flowframes-9999-Slim.7z -m0=flzma2 -mx5 "..\Code\bin\x64\Release\FlowframesApp9999"
+        ls
+        cd ..
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: flowframes-slim
+        path: D:\a\flowframes\flowframes\Build\flowframes-9999-Slim.7z
+
+    - name: Release
+      run: |
+        gh release upload flowframes-${{needs.release.outputs.timestamp}} D:\a\flowframes\flowframes\Build\flowframes-9999-Slim.7z
+        
